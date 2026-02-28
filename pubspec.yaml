@@ -1,0 +1,61 @@
+name: ndofi_apk
+description: N'Dofi - Gestion intelligente des présences
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: ">=3.0.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.6
+
+  # Base de données
+  sqflite: ^2.3.0
+  path: ^1.8.3
+
+  # State Management
+  provider: ^6.1.1
+
+  # Graphiques
+  fl_chart: ^0.66.2
+
+  # Export Excel
+  excel: ^4.0.2
+
+  # Export PDF
+  pdf: ^3.10.7
+  printing: ^5.12.0
+
+  # Partage de fichiers
+  share_plus: ^12.0.1
+
+  # Chemins de fichiers
+  path_provider: ^2.1.2
+
+  # Sélection de fichiers
+
+  # Formatage dates
+  intl: ^0.20.2
+
+  # Icônes
+  flutter_svg: ^2.0.9
+
+  # Animations
+  animate_do: ^4.2.0
+  file_picker: 10.3.10
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/images/   # Assure-toi que ce dossier existe aussi
+  fonts:
+    - family: Roboto
+      fonts:
+        - asset: assets/fonts/Roboto-VariableFont_wdth,wght.ttf
