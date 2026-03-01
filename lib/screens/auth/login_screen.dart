@@ -56,9 +56,14 @@ class _LoginScreenState extends State<LoginScreen> {
     if (ok) {
       Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const DashboardScreen()));
     } else {
+      // DEBUG TEMPORAIRE
+      final db = DatabaseHelper.instance;
+      final user = await db.getUserByUsername(_userCtrl.text.trim());
       setState(() {
         _hasError = true;
-        _errorMsg = 'Identifiant ou mot de passe incorrect, ou compte bloqué';
+        _errorMsg = user == null 
+            ? 'USER INTROUVABLE EN DB' 
+            : 'USER TROUVÉ - pass:${user['password']} blocked:${user['is_blocked']}';
       });
     }
   }
@@ -138,7 +143,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     ),
                     const SizedBox(height: 16),
                     const Text(
-                      "N' Dofi",
+                      "N'Dofi",
                       style: TextStyle(
                         fontSize: 36,
                         fontWeight: FontWeight.bold,
