@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../../core/constants/app_colors.dart';
-import '../../core/database/database_helper.dart';
 import '../../providers/app_state.dart';
 import '../dashboard/dashboard_screen.dart';
 
@@ -11,268 +11,394 @@ class LoginScreen extends StatefulWidget {
   State<LoginScreen> createState() => _LoginScreenState();
 }
 
-class _LoginScreenState extends State<LoginScreen> {
-  final _userCtrl = TextEditingController(text: 'admin');
+class _LoginScreenState extends State<LoginScreen>
+    with TickerProviderStateMixin {
+  final _userCtrl = TextEditingController();
   final _passCtrl = TextEditingController();
   bool _obscure = true;
+  bool _isLoading = false;
   bool _hasError = false;
-  bool _loading = false;
   String _errorMsg = '';
-  int _tapCount = 0;
+  bool _showSuccess = false;
+
+  // Animations
+  late AnimationController _fadeCtrl;
+  late AnimationController _shakeCtrl;
+  late AnimationController _successCtrl;
+  late Animation<double> _fadeAnim;
+  late Animation<double> _slideAnim;
+  late Animation<double> _shakeAnim;
+  late Animation<double> _successScale;
+  late Animation<double> _successOpacity;
+
+  @override
+  void initState() {
+    super.initState();
+
+    // Fade + slide au chargement
+    _fadeCtrl = AnimationController(
+        vsync: this, duration: const Duration(milliseconds: 800));
+    _fadeAnim = CurvedAnimation(parent: _fadeCtrl, curve: Curves.easeOut);
+    _slideAnim = Tween<double>(begin: 30, end: 0).animate(
+        CurvedAnimation(parent: _fadeCtrl, curve: Curves.easeOut));
+    _fadeCtrl.forward();
+
+    // Shake sur erreur
+    _shakeCtrl = AnimationController(
+        vsync: this, duration: const Duration(milliseconds: 400));
+    _shakeAnim = Tween<double>(begin: 0, end: 1).animate(
+        CurvedAnimation(parent: _shakeCtrl, curve: Curves.elasticIn));
+
+    // Animation succès
+    _successCtrl = AnimationController(
+        vsync: this, duration: const Duration(milliseconds: 600));
+    _successScale = Tween<double>(begin: 0, end: 1).animate(
+        CurvedAnimation(parent: _successCtrl, curve: Curves.elasticOut));
+    _successOpacity = CurvedAnimation(
+        parent: _successCtrl, curve: Curves.easeIn);
+  }
 
   @override
   void dispose() {
+    _fadeCtrl.dispose();
+    _shakeCtrl.dispose();
+    _successCtrl.dispose();
     _userCtrl.dispose();
     _passCtrl.dispose();
     super.dispose();
   }
 
   Future<void> _login() async {
-    if (_userCtrl.text.isEmpty || _passCtrl.text.isEmpty) {
+    final username = _userCtrl.text.trim();
+    final password = _passCtrl.text.trim();
+
+    if (username.isEmpty || password.isEmpty) {
       setState(() {
         _hasError = true;
         _errorMsg = 'Veuillez remplir tous les champs';
       });
+      _shakeCtrl.forward(from: 0);
       return;
     }
 
-    setState(() { _loading = true; _hasError = false; });
-    bool ok = false;
-    try {
-      // AJOUT DES .TRIM() POUR EVITER LES ESPACES CACHES
-      final username = _userCtrl.text.trim();
-      final password = _passCtrl.text.trim();
+    setState(() { _isLoading = true; _hasError = false; });
 
-      ok = await context.read<AppState>()
-          .login(username, password)
-          .timeout(const Duration(seconds: 10), onTimeout: () => false);
-    } catch (e) {
-      ok = false;
-    }
+    final ok = await context.read<AppState>().login(username, password);
 
     if (!mounted) return;
-    setState(() { _loading = false; });
 
     if (ok) {
-      Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const DashboardScreen()));
-    } else {
-      // DEBUG TEMPORAIRE
-      final db = DatabaseHelper.instance;
-      final user = await db.getUserByUsername(_userCtrl.text.trim());
-      setState(() {
-        _hasError = true;
-        _errorMsg = user == null 
-            ? 'USER INTROUVABLE EN DB' 
-            : 'USER TROUVÉ - pass:${user['password']} blocked:${user['is_blocked']}';
-      });
-    }
-  }
+      // Animation de succès
+      setState(() { _showSuccess = true; _isLoading = false; });
+      await _successCtrl.forward();
+      await Future.delayed(const Duration(milliseconds: 1200));
 
-  // Appuyer 5 fois sur le logo pour afficher la réinitialisation
-  void _onLogoTap() {
-    setState(() => _tapCount++);
-    if (_tapCount >= 5) {
-      setState(() => _tapCount = 0);
-      _showResetDialog();
-    }
-  }
+      if (!mounted) return;
 
-  Future<void> _showResetDialog() async {
-    final confirm = await showDialog<bool>(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: const Text('Réinitialisation d\'urgence'),
-        content: const Text(
-          'Ceci va réinitialiser le compte admin avec le mot de passe par défaut "admin123".\n\nContinuer ?',
-        ),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Annuler'),
+      // Navigation vers dashboard
+      Navigator.pushReplacement(
+        context,
+        PageRouteBuilder(
+          pageBuilder: (_, anim, __) => const DashboardScreen(),
+          transitionsBuilder: (_, anim, __, child) => FadeTransition(
+            opacity: anim, child: child,
           ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: AppColors.absent),
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Réinitialiser', style: TextStyle(color: Colors.white)),
-          ),
-        ],
-      ),
-    );
-
-    if (confirm == true && mounted) {
-      await DatabaseHelper.instance.resetAdminAccount();
-      setState(() {
-        _userCtrl.text = 'admin';
-        _passCtrl.text = '';
-        _hasError = false;
-      });
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('✅ Compte réinitialisé ! Connectez-vous avec admin / admin123'),
-          backgroundColor: AppColors.present,
-          duration: Duration(seconds: 4),
+          transitionDuration: const Duration(milliseconds: 400),
         ),
       );
+    } else {
+      setState(() {
+        _isLoading = false;
+        _hasError = true;
+        _errorMsg = 'Identifiant ou mot de passe incorrect';
+      });
+      _shakeCtrl.forward(from: 0);
+      HapticFeedback.mediumImpact();
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: AppColors.primary,
-      body: SafeArea(
-        child: Column(
-          children: [
-            Expanded(
-              flex: 2,
-              child: Center(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    GestureDetector(
-                      onTap: _onLogoTap,
-                      child: Container(
-                        padding: const EdgeInsets.all(20),
-                        decoration: BoxDecoration(
-                          color: Colors.white.withOpacity(0.2),
-                          shape: BoxShape.circle,
-                        ),
-                        child: const Icon(Icons.people_alt, size: 60, color: Colors.white),
-                      ),
+    // Écran de succès
+    if (_showSuccess) {
+      return Scaffold(
+        backgroundColor: AppColors.primary,
+        body: Center(
+          child: ScaleTransition(
+            scale: _successScale,
+            child: FadeTransition(
+              opacity: _successOpacity,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    width: 100, height: 100,
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.15),
+                      shape: BoxShape.circle,
                     ),
-                    const SizedBox(height: 16),
-                    const Text(
-                      "N'Dofi",
-                      style: TextStyle(
-                        fontSize: 36,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.white,
-                        letterSpacing: 1.5,
-                      ),
+                    child: const Icon(Icons.check_circle,
+                        size: 64, color: Colors.white),
+                  ),
+                  const SizedBox(height: 24),
+                  Text(
+                    'Bienvenue,\n${_userCtrl.text.trim()} !',
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 28,
+                      fontWeight: FontWeight.bold,
+                      height: 1.3,
                     ),
-                    const SizedBox(height: 8),
-                    Text(
-                      'Gestion intelligente des présences',
-                      style: TextStyle(fontSize: 13, color: Colors.white.withOpacity(0.8)),
+                  ),
+                  const SizedBox(height: 12),
+                  const Text(
+                    'Chargement de votre espace...',
+                    style: TextStyle(color: Colors.white70, fontSize: 14),
+                  ),
+                  const SizedBox(height: 32),
+                  const SizedBox(
+                    width: 32, height: 32,
+                    child: CircularProgressIndicator(
+                      valueColor: AlwaysStoppedAnimation(Colors.white54),
+                      strokeWidth: 2,
                     ),
-                    if (_tapCount > 0 && _tapCount < 5)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 8),
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: List.generate(5, (i) => Container(
-                            margin: const EdgeInsets.symmetric(horizontal: 3),
-                            width: 6, height: 6,
-                            decoration: BoxDecoration(
-                              shape: BoxShape.circle,
-                              color: i < _tapCount
-                                  ? Colors.white.withOpacity(0.8)
-                                  : Colors.white.withOpacity(0.2),
-                            ),
-                          )),
-                        ),
-                      ),
-                  ],
-                ),
+                  ),
+                ],
               ),
             ),
-            Expanded(
-              flex: 3,
-              child: Container(
-                padding: const EdgeInsets.all(32),
-                decoration: const BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.vertical(top: Radius.circular(32)),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    const Text(
-                      'Connexion',
-                      style: TextStyle(
-                        fontSize: 22,
-                        fontWeight: FontWeight.bold,
-                        color: AppColors.textPrimary,
+          ),
+        ),
+      );
+    }
+
+    return Scaffold(
+      backgroundColor: AppColors.background,
+      body: AnimatedBuilder(
+        animation: _fadeCtrl,
+        builder: (_, child) => Opacity(
+          opacity: _fadeAnim.value,
+          child: Transform.translate(
+            offset: Offset(0, _slideAnim.value),
+            child: child,
+          ),
+        ),
+        child: SafeArea(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              children: [
+                const SizedBox(height: 48),
+
+                // Logo
+                Container(
+                  width: 90, height: 90,
+                  decoration: BoxDecoration(
+                    gradient: const LinearGradient(
+                      colors: [AppColors.primary, AppColors.primaryLight],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                    ),
+                    borderRadius: BorderRadius.circular(24),
+                    boxShadow: [
+                      BoxShadow(
+                        color: AppColors.primary.withOpacity(0.35),
+                        blurRadius: 20,
+                        offset: const Offset(0, 8),
                       ),
+                    ],
+                  ),
+                  child: const Icon(Icons.people_alt,
+                      size: 48, color: Colors.white),
+                ),
+                const SizedBox(height: 20),
+
+                // Titre
+                const Text(
+                  "N' Dofi",
+                  style: TextStyle(
+                    fontSize: 32,
+                    fontWeight: FontWeight.bold,
+                    color: AppColors.primary,
+                    letterSpacing: 1,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                const Text(
+                  'Gestion intelligente des présences',
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: AppColors.textSecondary,
+                  ),
+                ),
+                const SizedBox(height: 48),
+
+                // Formulaire avec shake
+                AnimatedBuilder(
+                  animation: _shakeCtrl,
+                  builder: (_, child) => Transform.translate(
+                    offset: Offset(
+                      _shakeAnim.value > 0
+                          ? 8 * (0.5 - (_shakeAnim.value % 1).abs())
+                          : 0,
+                      0,
                     ),
-                    const SizedBox(height: 6),
-                    Text(
-                      'Entrez vos identifiants pour continuer',
-                      style: TextStyle(color: AppColors.textSecondary, fontSize: 13),
-                    ),
-                    const SizedBox(height: 24),
+                    child: child,
+                  ),
+                  child: Column(children: [
+                    // Champ identifiant
                     TextField(
                       controller: _userCtrl,
-                      decoration: const InputDecoration(
-                        labelText: 'Identifiant',
-                        prefixIcon: Icon(Icons.person_outline),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    TextField(
-                      controller: _passCtrl,
-                      obscureText: _obscure,
-                      onSubmitted: (_) => _login(),
+                      textInputAction: TextInputAction.next,
+                      onChanged: (_) => setState(() => _hasError = false),
                       decoration: InputDecoration(
-                        labelText: 'Mot de passe',
-                        prefixIcon: const Icon(Icons.lock_outline),
-                        suffixIcon: IconButton(
-                          icon: Icon(_obscure ? Icons.visibility : Icons.visibility_off),
-                          onPressed: () => setState(() => _obscure = !_obscure),
+                        labelText: 'Identifiant',
+                        prefixIcon: const Icon(Icons.person_outline),
+                        errorText: null,
+                        filled: true,
+                        fillColor: Colors.white,
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide.none,
                         ),
-                        errorText: _hasError ? _errorMsg : null,
-                      ),
-                    ),
-                    const SizedBox(height: 24),
-                    SizedBox(
-                      height: 52,
-                      child: ElevatedButton(
-                        onPressed: _loading ? null : _login,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: AppColors.primary,
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: const BorderSide(
+                              color: AppColors.primary, width: 2),
                         ),
-                        child: _loading
-                            ? const CircularProgressIndicator(color: Colors.white)
-                            : const Text(
-                                'Se connecter',
-                                style: TextStyle(
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.w600,
-                                  color: Colors.white,
-                                ),
-                              ),
-                      ),
-                    ),
-                    const Spacer(),
-                    Center(
-                      child: Text(
-                        'Par défaut : admin / admin123',
-                        style: TextStyle(
-                          color: AppColors.textSecondary.withOpacity(0.5),
-                          fontSize: 11,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Center(
-                      child: GestureDetector(
-                        onTap: _showResetDialog,
-                        child: Text(
-                          'Réinitialiser le compte admin',
-                          style: TextStyle(
-                            color: AppColors.textSecondary.withOpacity(0.25),
-                            fontSize: 10,
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide(
+                            color: _hasError
+                                ? AppColors.absent.withOpacity(0.5)
+                                : Colors.grey.withOpacity(0.2),
                           ),
                         ),
                       ),
                     ),
-                  ],
+                    const SizedBox(height: 14),
+
+                    // Champ mot de passe
+                    TextField(
+                      controller: _passCtrl,
+                      obscureText: _obscure,
+                      textInputAction: TextInputAction.done,
+                      onSubmitted: (_) => _login(),
+                      onChanged: (_) => setState(() => _hasError = false),
+                      decoration: InputDecoration(
+                        labelText: 'Mot de passe',
+                        prefixIcon: const Icon(Icons.lock_outline),
+                        suffixIcon: IconButton(
+                          icon: Icon(_obscure
+                              ? Icons.visibility_off_outlined
+                              : Icons.visibility_outlined),
+                          onPressed: () =>
+                              setState(() => _obscure = !_obscure),
+                        ),
+                        filled: true,
+                        fillColor: Colors.white,
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide.none,
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: const BorderSide(
+                              color: AppColors.primary, width: 2),
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide(
+                            color: _hasError
+                                ? AppColors.absent.withOpacity(0.5)
+                                : Colors.grey.withOpacity(0.2),
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+
+                    // Message d'erreur
+                    AnimatedSwitcher(
+                      duration: const Duration(milliseconds: 200),
+                      child: _hasError
+                          ? Container(
+                              key: const ValueKey('error'),
+                              width: double.infinity,
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 12, vertical: 8),
+                              decoration: BoxDecoration(
+                                color: AppColors.absent.withOpacity(0.08),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Row(children: [
+                                const Icon(Icons.error_outline,
+                                    color: AppColors.absent, size: 16),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Text(_errorMsg,
+                                      style: const TextStyle(
+                                          color: AppColors.absent,
+                                          fontSize: 13)),
+                                ),
+                              ]),
+                            )
+                          : const SizedBox.shrink(key: ValueKey('no_error')),
+                    ),
+                    const SizedBox(height: 24),
+
+                    // Bouton connexion
+                    SizedBox(
+                      width: double.infinity,
+                      height: 52,
+                      child: ElevatedButton(
+                        onPressed: _isLoading ? null : _login,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: AppColors.primary,
+                          foregroundColor: Colors.white,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                          elevation: 4,
+                          shadowColor: AppColors.primary.withOpacity(0.4),
+                        ),
+                        child: _isLoading
+                            ? const SizedBox(
+                                width: 22, height: 22,
+                                child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    valueColor: AlwaysStoppedAnimation(
+                                        Colors.white)),
+                              )
+                            : const Text('Se connecter',
+                                style: TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w600)),
+                      ),
+                    ),
+                  ]),
                 ),
-              ),
+
+                const SizedBox(height: 48),
+
+                // Footer
+                const Text(
+                  '100% hors ligne · Données sécurisées',
+                  style: TextStyle(
+                      fontSize: 11, color: AppColors.textSecondary),
+                ),
+                const SizedBox(height: 8),
+                Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                  const Icon(Icons.storage,
+                      size: 12, color: AppColors.textSecondary),
+                  const SizedBox(width: 4),
+                  const Text('SQLite local',
+                      style: TextStyle(
+                          fontSize: 11, color: AppColors.textSecondary)),
+                ]),
+              ],
             ),
-          ],
+          ),
         ),
       ),
     );
