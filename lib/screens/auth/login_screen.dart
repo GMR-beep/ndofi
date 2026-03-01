@@ -215,7 +215,7 @@ class _LoginScreenState extends State<LoginScreen>
 
                 // Titre
                 const Text(
-                  "N' Dofi",
+                  "N'Dofi",
                   style: TextStyle(
                     fontSize: 32,
                     fontWeight: FontWeight.bold,

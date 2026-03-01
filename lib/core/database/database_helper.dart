@@ -359,14 +359,23 @@ class DatabaseHelper {
     try {
       final user = await getUserByUsername(username);
       if (user == null) return false;
-      if ((user['is_blocked'] as int) == 1) return false;
-      if (user['password'] != password) return false;
-      final db = await database;
-      await db.update('app_users',
-        {'last_login': DateTime.now().toIso8601String()},
-        where: 'id = ?', whereArgs: [user['id']],
-      );
-      await logActivity(user['id'] as int, null, 'LOGIN', 'Connexion réussie');
+      if ((user['is_blocked'] as int? ?? 0) == 1) return false;
+      if ((user['password'] as String?) != password) return false;
+
+      // Mise à jour last_login + log — non-bloquants, n'affectent pas le résultat
+      try {
+        final db = await database;
+        await db.update(
+          'app_users',
+          {'last_login': DateTime.now().toIso8601String()},
+          where: 'id = ?', whereArgs: [user['id']],
+        );
+        await logActivity(
+            user['id'] as int, null, 'LOGIN', 'Connexion réussie');
+      } catch (_) {
+        // Erreur non critique — on laisse passer
+      }
+
       return true;
     } catch (e) {
       return false;
