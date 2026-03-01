@@ -70,34 +70,45 @@ class AppState extends ChangeNotifier {
 
   // ===== AUTH =====
   Future<bool> login(String username, String password) async {
+    // ÉTAPE 1 : Auth uniquement — isolée
     try {
-      final ok = await _db.authenticateUser(username, password)
-          .timeout(const Duration(seconds: 8), onTimeout: () => false);
+      final ok = await _db.authenticateUser(username, password);
       if (!ok) return false;
-
-      final userMap = await _db.getUserByUsername(username);
-      if (userMap == null) return false;
-      _currentUser = AppUser.fromMap(userMap);
-
-      final orgMaps = await _db.getOrganizations()
-          .timeout(const Duration(seconds: 8), onTimeout: () => []);
-      _organizations = orgMaps.map((m) => Organization.fromMap(m)).toList();
-
-      if (_organizations.isNotEmpty) {
-        _currentOrg = _organizations.first;
-      }
-
-      notifyListeners();
-
-      if (_currentOrg != null) {
-        loadOrgData(); // pas d'await intentionnel
-      }
-
-      return true;
     } catch (e) {
-      debugPrint('Login error: $e');
+      debugPrint('Auth error: $e');
       return false;
     }
+
+    // ÉTAPE 2 : Charger l'utilisateur — non bloquant pour le login
+    try {
+      final userMap = await _db.getUserByUsername(username);
+      _currentUser = userMap != null
+          ? AppUser.fromMap(userMap)
+          : AppUser(username: username, password: password, role: 'user');
+    } catch (e) {
+      debugPrint('Load user error: $e');
+      _currentUser = AppUser(
+          username: username, password: password, role: 'user');
+    }
+
+    // ÉTAPE 3 : Charger les organisations — non bloquant pour le login
+    try {
+      final orgMaps = await _db.getOrganizations();
+      _organizations = orgMaps.map((m) => Organization.fromMap(m)).toList();
+      if (_organizations.isNotEmpty) _currentOrg = _organizations.first;
+    } catch (e) {
+      debugPrint('Load orgs error: $e');
+      _organizations = [];
+    }
+
+    notifyListeners();
+
+    // ÉTAPE 4 : Chargement données en arrière-plan
+    if (_currentOrg != null) {
+      loadOrgData().catchError((e) => debugPrint('loadOrgData: $e'));
+    }
+
+    return true; // Auth réussie quoi qu'il arrive après
   }
 
   void logout() {
